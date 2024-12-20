@@ -6,44 +6,63 @@ import cv2
 import os
 import tqdm
 
-# create remover
+# Create remover
 remover = Remover(mode='fast')
 
-image_folder = 'images'
+input_folder = 'images/input'
+output_folder = 'images/output'
 
-# remove output directory if exist and all files
-if os.path.exists(os.path.join(image_folder, 'output')):
-    shutil.rmtree(os.path.join(image_folder, 'output'))
+# Remove the output directory if it exists and all its contents
+if os.path.exists(output_folder):
+    shutil.rmtree(output_folder)
 
-# create output folder
-os.makedirs(os.path.join(image_folder, 'output'), exist_ok=True)
+# Create the output folder
+os.makedirs(output_folder, exist_ok=True)
 
-# list all files with jpg extension
-files = [file for file in os.listdir(image_folder) if file.endswith('.jpg')]
+# Walk through the input folder recursively
+for root, dirs, files in os.walk(input_folder):
+    for file in tqdm.tqdm(files, desc=f"Processing files in {root}"):
+        if file.endswith('.jpg'):  # Process only .jpg files
+            input_image_path = os.path.join(root, file)
 
-# for each file
-for file in tqdm.tqdm(files):
+            # Determine relative path of the current file
+            relative_path = os.path.relpath(input_image_path, input_folder)
 
-    input_image_path = os.path.join(image_folder, file)
-    output_image_path = os.path.join(image_folder, 'output', file)
+            # Construct the corresponding output path
+            output_image_path = os.path.join(output_folder, relative_path)
 
-    # read image
-    imagen = Image.open(input_image_path).convert('RGB')
+            # Create necessary directories in the output path
+            os.makedirs(os.path.dirname(output_image_path), exist_ok=True)
 
-    # proceed image
-    out = np.array(remover.process(imagen, type='map'))
+            # Read image
+            imagen = Image.open(input_image_path).convert('RGB')
+            original_array = np.array(imagen)
 
-    # convert to gray
-    out = cv2.cvtColor(out, cv2.COLOR_RGB2GRAY)
+            # Process image to remove background (get the mask)
+            mask = np.array(remover.process(imagen, type='map'))
 
-    # binarize image
-    _, out = cv2.threshold(out, 127, 255, cv2.THRESH_BINARY)
+            # Convert mask to grayscale
+            mask = cv2.cvtColor(mask, cv2.COLOR_RGB2GRAY)
 
-    # set kernel
-    kernel = np.ones((11, 11), np.uint8)
+            # Binarize mask
+            _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
 
-    # closing image to fill holes
-    out = cv2.morphologyEx(out, cv2.MORPH_CLOSE, kernel)
+            # Refine the mask using morphological closing to fill holes
+            kernel = np.ones((11, 11), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-    # save image
-    cv2.imwrite(output_image_path, out)
+            # Invert the mask for background removal
+            inverted_mask = cv2.bitwise_not(mask)
+
+            # Apply the mask to the original image
+            foreground = cv2.bitwise_and(original_array, original_array, mask=mask)
+
+            # Replace background with white
+            background = cv2.bitwise_and(np.full_like(original_array, 255), 
+                                         np.full_like(original_array, 255), mask=inverted_mask)
+
+            # Combine foreground and background
+            output_image = cv2.add(foreground, background)
+
+            # Save the resulting image
+            cv2.imwrite(output_image_path, cv2.cvtColor(output_image, cv2.COLOR_RGB2BGR))

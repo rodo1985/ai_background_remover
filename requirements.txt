@@ -1,0 +1,5 @@
+numpy
+tqdm
+opencv-python
+pillow
+transparent-background
